@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<!-- Commented by anthropic's Opus 4.8 -->
+<html lang="en">
+<head>
+  <script src="/scripts/theme-presets.js"></script>
+  <script src="/scripts/config.js"></script>
+  <script src="/scripts/site-config.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoardEngine</title>
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    (function () {
+      try {
+        var raw = localStorage.getItem('boardSettings');
+        var settings = raw ? JSON.parse(raw) : {};
+        var savedPreset = typeof settings.themePreset === 'string' ? settings.themePreset.trim() : '';
+        var savedCss = typeof settings.customCss === 'string' ? settings.customCss.trim() : '';
+        var policy = getBoardThemePolicy(null);
+        var presetKey = policy.defaultPreset;
+        var css = '';
+
+        if (policy.forcePreset) {
+          presetKey = policy.forcePreset;
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else if (savedCss) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = savedCss;
+        } else if (savedPreset) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else {
+          css = getThemePreset(policy.defaultPreset, policy.siteDefaultPreset).css;
+        }
+
+        css = typeof css === 'string' ? css.trim() : '';
+        if (!css) return;
+
+        var style = document.createElement('style');
+        style.id = 'custom-settings-css';
+        style.textContent = css;
+        document.head.appendChild(style);
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+
+<nav>
+  <a href="/">[Home]</a>
+  <a href="/log.html">[Log]</a>
+  <div class="nav-boards" id="nav-boards">
+    <!-- populated by script -->
+  </div>
+</nav>
+
+<div class="logo-wrap">
+  <img src="/Logo.png" alt="Board logo" class="site-logo">
+</div>
+
+<!-- Welcome table -->
+<div class="welcome-wrap">
+  <table class="welcome-table">
+    <tbody>
+      <tr>
+        <th class="welcome-header">Welcome</th>
+      </tr>
+      <tr>
+        <td class="welcome-body">
+          <div class="welcome-copy">
+            <div class="welcome-copy-title">Welcome.</div>
+            <div>Great Fnord awaits ahead. . .</div>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="table-wrap">
+  <table class="log-table">
+    <thead>
+      <tr>
+        <th colspan="3" style="text-align:center;">Log</th>
+      </tr>
+    </thead>
+    <tbody id="log-list-body">
+      <tr>
+        <td colspan="3" style="text-align:center;color:#888;padding:16px 8px;">Loading log...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Board list — built dynamically from BOARDS in board.js -->
+<div class="table-wrap">
+  <table class="board-directory-table">
+    <thead>
+      <tr>
+        <th style="width: 38%;">Board</th>
+        <th>Description</th>
+        <th class="board-stat-col" style="width: 10%;">Threads</th>
+        <th class="board-stat-col" style="width: 10%;">Posts</th>
+      </tr>
+    </thead>
+    <tbody id="board-list-body">
+      <!-- rows injected by script below -->
+    </tbody>
+  </table>
+</div>
+
+<!-- Site Stats (under the board list) -->
+<div class="site-stats">
+  <div class="site-stats-head">Site Stats</div>
+  <div class="site-stats-body" id="site-stats-body">
+    Sitewide, <b id="stat-day">—</b> posts have been made in the last day,
+    <b id="stat-hour">—</b> in the last hour and <b id="stat-total">—</b> in total.
+  </div>
+</div>
+
+<div class="friend-sites">
+  <div class="friend-head">Friend Sites:</div>
+  <a href="https://paperweb.nekoweb.org" target="_blank" rel="noopener">
+    <img src="/ButtonPaperweb.png" alt="Paperweb" width="176" height="62">
+  </a>
+</div>
+
+<footer>
+  — <a href="/">home</a> —
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/scripts/api.js"></script>
+<script src="/scripts/utils.js"></script>
+<script src="/scripts/persistence.js"></script>
+<script src="/scripts/social.js"></script>
+<script src="/scripts/routing.js"></script>
+<script src="/scripts/views/core.js"></script>
+<script src="/scripts/views/quote-preview.js"></script>
+<script src="/scripts/views/board-search.js"></script>
+<script src="/scripts/views/board-view.js"></script>
+<script src="/scripts/views/thread-view.js"></script>
+<script src="/scripts/views.js"></script>
+<script src="/board.js"></script>
+<script src="/scripts/version.js"></script>
+<script>
+  (async function () {
+    const navEl = document.getElementById('nav-boards');
+    const tbody = document.getElementById('board-list-body');
+    const logTbody = document.getElementById('log-list-body');
+    const CACHE_KEY = 'boardDirectoryStatsCache';
+    const LOG_CACHE_KEY = 'indexLogCache';
+
+    // Site Stats — sitewide post counts (last day / hour / total).
+    (async () => {
+      try {
+        const s = await API.getSiteStats();
+        const fmt = (n) => Number(n || 0).toLocaleString();
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+        set('stat-day', s.day);
+        set('stat-hour', s.hour);
+        set('stat-total', s.total);
+      } catch (e) { console.warn('site stats failed:', e); }
+    })();
+
+    // Show the floating thread watcher here too, not just on board pages.
+    if (window.Social) Social.init();
+
+    function renderTotalRow(totals) {
+      const html = `
+        <tr id="total-row" class="total-row" style="background: rgba(0,0,0,0.05); font-weight: bold;">
+          <td colspan="2" class="total-label-cell">Totals:</td>
+          <td class="post-count board-stat-col">${totals.threads}</td>
+          <td class="post-count board-stat-col">${totals.posts}</td>
+        </tr>
+      `;
+      const existing = document.getElementById('total-row');
+
+      if (existing) {
+        existing.outerHTML = html;
+        return;
+      }
+
+      tbody.insertAdjacentHTML('beforeend', html);
+    }
+
+    function loadCachedStats() {
+      try {
+        const raw = sessionStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+
+        const cached = JSON.parse(raw);
+        if (!cached || !cached.stats || !cached.totals || typeof cached.savedAt !== 'number') return null;
+        return cached;
+      } catch (e) {
+        console.warn('Failed to read cached board stats:', e);
+        return null;
+      }
+    }
+
+    function saveCachedStats(stats, totals) {
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+          savedAt: Date.now(),
+          stats,
+          totals,
+        }));
+      } catch (e) {
+        console.warn('Failed to cache board stats:', e);
+      }
+    }
+
+    function applyStats(stats, totals) {
+      for (const [key, value] of Object.entries(stats)) {
+        const threadsCell = document.getElementById(`count-threads-${key}`);
+        const postsCell = document.getElementById(`count-posts-${key}`);
+        if (threadsCell) threadsCell.textContent = value.threads;
+        if (postsCell) postsCell.textContent = value.posts;
+      }
+      renderTotalRow(totals);
+    }
+
+    function loadCachedLogs() {
+      try {
+        const raw = sessionStorage.getItem(LOG_CACHE_KEY);
+        if (!raw) return null;
+        const cached = JSON.parse(raw);
+        return Array.isArray(cached) ? cached : null;
+      } catch (e) {
+        console.warn('Failed to read cached homepage logs:', e);
+        return null;
+      }
+    }
+
+    function saveCachedLogs(entries) {
+      try {
+        sessionStorage.setItem(LOG_CACHE_KEY, JSON.stringify(entries));
+      } catch (e) {
+        console.warn('Failed to cache homepage logs:', e);
+      }
+    }
+
+    function renderLogs(entries) {
+      if (!entries.length) {
+        logTbody.innerHTML = `
+          <tr>
+            <td colspan="3" style="text-align:center;color:#888;padding:16px 8px;">No log entries yet.</td>
+          </tr>
+        `;
+        return;
+      }
+
+      logTbody.innerHTML = entries.map((entry) => `
+        <tr>
+          <td>
+            <a href="/log.html#log-${entry.number}">${Utils.escHtml(entry.title)}</a>
+          </td>
+          <td class="log-preview-cell">${Utils.escHtml(Utils.getLogExcerpt(entry.body))}</td>
+          <td class="post-count">${Utils.relTime(entry.created_at)}</td>
+        </tr>
+      `).join('');
+    }
+    
+    // 1. Build Nav as usual
+    const navLinks = getBoardKeys()
+      .map((key) => [key, getBoardConfig(key)])
+      .filter(([, info]) => info && info.showInNav)
+      .map(([key, info]) => `<a href="/board.html?board=${encodeURIComponent(key)}">${info.name}</a>`)
+      .join(' ');
+    navEl.innerHTML = '[ ' + navLinks + ' ]';
+
+    // 2. Initialize the table with "..." loading indicators
+    const directoryBoards = getBoardKeys()
+      .map((key) => [key, getBoardConfig(key)])
+      .filter(([, info]) => info && info.showInDirectory);
+
+    tbody.innerHTML = directoryBoards.map(([key, info]) => `
+      <tr id="row-${key}">
+        <td><a href="/board.html?board=${encodeURIComponent(key)}">${info.name}</a></td>
+        <td class="desc">${info.desc}</td>
+        <td class="post-count board-stat-col" id="count-threads-${key}">...</td>
+        <td class="post-count board-stat-col" id="count-posts-${key}">...</td>
+      </tr>
+    `).join('');
+
+    const logsPromise = API.getLogs(5);
+    const cachedLogs = loadCachedLogs();
+    if (cachedLogs) {
+      renderLogs(cachedLogs);
+    }
+
+    const cached = loadCachedStats();
+    if (cached) {
+      applyStats(cached.stats, cached.totals);
+    } else {
+      renderTotalRow({ threads: '...', posts: '...' });
+    }
+
+    // 3. Fetch stats for each board in parallel, then refresh the table.
+    const results = await Promise.allSettled(
+      directoryBoards.map(async ([key]) => {
+        const stats = await API.getBoardStats(key, { fresh: true });
+        return [key, stats];
+      })
+    );
+
+    const freshStats = {};
+    const totals = {
+      threads: 0,
+      posts: 0,
+    };
+
+    results.forEach((result, index) => {
+      const key = directoryBoards[index][0];
+
+      if (result.status === 'fulfilled') {
+        const [boardKey, boardStats] = result.value;
+        freshStats[boardKey] = boardStats;
+        totals.threads += boardStats.threads;
+        totals.posts += boardStats.posts;
+        return;
+      }
+
+      const cachedValue = cached && cached.stats ? cached.stats[key] : null;
+      freshStats[key] = cachedValue ?? { threads: '??', posts: '??' };
+      if (cachedValue && typeof cachedValue.threads === 'number') {
+        totals.threads += cachedValue.threads;
+      }
+      if (cachedValue && typeof cachedValue.posts === 'number') {
+        totals.posts += cachedValue.posts;
+      }
+      console.error(`Error fetching stats for ${key}:`, result.reason);
+    });
+
+    applyStats(freshStats, totals);
+
+    const hasErrors = Object.values(freshStats).some((value) =>
+      value.threads === '??' || value.posts === '??'
+    );
+    if (!hasErrors) {
+      saveCachedStats(freshStats, totals);
+    }
+
+    try {
+      const logs = await logsPromise;
+      renderLogs(logs);
+      saveCachedLogs(logs);
+    } catch (e) {
+      if (!cachedLogs) {
+        logTbody.innerHTML = `
+          <tr>
+            <td colspan="3" style="text-align:center;color:#888;padding:16px 8px;">Failed to load log.</td>
+          </tr>
+        `;
+      }
+      console.error('Error fetching logs:', e);
+    }
+  })();
+</script>
+</body>
+</html>

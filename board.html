@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<!-- Commented by anthropic's Opus 4.8 -->
+<html lang="en">
+<head>
+  <script src="/scripts/theme-presets.js"></script>
+  <script src="/scripts/config.js"></script>
+  <script src="/scripts/site-config.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StaticBoard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    (function () {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        var boardKey = params.get('board');
+        var raw = localStorage.getItem('boardSettings');
+        var settings = raw ? JSON.parse(raw) : {};
+        var savedPreset = typeof settings.themePreset === 'string' ? settings.themePreset.trim() : '';
+        var savedCss = typeof settings.customCss === 'string' ? settings.customCss.trim() : '';
+        var policy = getBoardThemePolicy(boardKey && getBoardConfig(boardKey) ? boardKey : null);
+        var presetKey = policy.defaultPreset;
+        var css = '';
+
+        if (policy.forcePreset) {
+          presetKey = policy.forcePreset;
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else if (savedCss) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = savedCss;
+        } else if (savedPreset) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else {
+          css = getThemePreset(policy.defaultPreset, policy.siteDefaultPreset).css;
+        }
+
+        css = typeof css === 'string' ? css.trim() : '';
+        if (!css) return;
+
+        var style = document.createElement('style');
+        style.id = 'custom-settings-css';
+        style.textContent = css;
+        document.head.appendChild(style);
+      } catch (_) {}
+    })();
+  </script>
+  <!-- marked and DOMPurify removed: markdown was overriding greentext rendering.
+       board.js now uses a plain-text renderer that correctly handles >greentext. -->
+</head>
+<body>
+
+<nav>
+  <a href="/">[Home]</a>
+  <a href="/log.html">[Log]</a>
+  <!-- Board links are injected dynamically by board.js buildNav() -->
+  <div class="nav-boards"></div>
+</nav>
+
+<!-- board.js renders everything into #app -->
+<div id="app"></div>
+
+<div class="friend-sites">
+  <div class="friend-head">Friend Sites:</div>
+  <a href="https://paperweb.nekoweb.org" target="_blank" rel="noopener">
+    <img src="/ButtonPaperweb.png" alt="Paperweb" width="176" height="62">
+  </a>
+</div>
+
+<footer>
+  — <a href="/">home</a> —
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/scripts/api.js"></script>
+<script src="/scripts/utils.js"></script>
+<script src="/scripts/persistence.js"></script>
+<script src="/scripts/social.js"></script>
+<script src="/scripts/routing.js"></script>
+<script src="/scripts/views/core.js"></script>
+<script src="/scripts/views/quote-preview.js"></script>
+<script src="/scripts/views/board-search.js"></script>
+<script src="/scripts/views/board-view.js"></script>
+<script src="/scripts/views/thread-view.js"></script>
+<script src="/scripts/views.js"></script>
+<script src="/board.js"></script>
+<script src="/scripts/version.js"></script>
+</body>
+</html>

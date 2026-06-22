@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<!-- Commented by anthropic's Opus 4.8 -->
+<html lang="en">
+<head>
+  <script src="/scripts/theme-presets.js"></script>
+  <script src="/scripts/config.js"></script>
+  <script src="/scripts/site-config.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log</title>
+  <link rel="stylesheet" href="/style.css">
+  <script>
+    (function () {
+      try {
+        var raw = localStorage.getItem('boardSettings');
+        var settings = raw ? JSON.parse(raw) : {};
+        var savedPreset = typeof settings.themePreset === 'string' ? settings.themePreset.trim() : '';
+        var savedCss = typeof settings.customCss === 'string' ? settings.customCss.trim() : '';
+        var policy = getBoardThemePolicy(null);
+        var presetKey = policy.defaultPreset;
+        var css = '';
+
+        if (policy.forcePreset) {
+          presetKey = policy.forcePreset;
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else if (savedCss) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = savedCss;
+        } else if (savedPreset) {
+          presetKey = getThemePresetKey(savedPreset, policy.defaultPreset);
+          css = getThemePreset(presetKey, policy.defaultPreset).css;
+        } else {
+          css = getThemePreset(policy.defaultPreset, policy.siteDefaultPreset).css;
+        }
+
+        css = typeof css === 'string' ? css.trim() : '';
+        if (!css) return;
+
+        var style = document.createElement('style');
+        style.id = 'custom-settings-css';
+        style.textContent = css;
+        document.head.appendChild(style);
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+
+<nav>
+  <a href="/">[Home]</a>
+  <a href="/log.html">[Log]</a>
+  <div class="nav-boards" id="nav-boards"></div>
+</nav>
+
+<div class="floating-jump-nav">
+  <a href="#!" data-jump="top">[▲]</a>
+  <a href="#!" data-jump="bottom">[▼]</a>
+</div>
+
+<div id="view-top"></div>
+
+<div class="log-wrap">
+  <div class="board-header">
+    <h1>[Log]</h1>
+    <p>We're about to answer your questions about Soil! But before we do, let's learn a little bit more. . . .</p>
+  </div>
+  <hr>
+
+  <main>
+    <div id="log-loading">Loading log...</div>
+    <div id="log-error" style="display:none">Failed to load log.</div>
+    <div id="log-list" class="log-list"></div>
+    <div id="view-bottom"></div>
+  </main>
+</div>
+
+<div class="friend-sites">
+  <div class="friend-head">Friend Sites:</div>
+  <a href="https://paperweb.nekoweb.org" target="_blank" rel="noopener">
+    <img src="/ButtonPaperweb.png" alt="Paperweb" width="176" height="62">
+  </a>
+</div>
+
+<footer>
+  — <a href="/">home</a> —
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/scripts/api.js"></script>
+<script src="/scripts/utils.js"></script>
+<script src="/scripts/persistence.js"></script>
+<script src="/scripts/social.js"></script>
+<script src="/scripts/routing.js"></script>
+<script src="/scripts/views/core.js"></script>
+<script src="/scripts/views/quote-preview.js"></script>
+<script src="/scripts/views/board-search.js"></script>
+<script src="/scripts/views/board-view.js"></script>
+<script src="/scripts/views/thread-view.js"></script>
+<script src="/scripts/views.js"></script>
+<script src="/board.js"></script>
+<script src="/scripts/version.js"></script>
+<script>
+  (async function () {
+    const navEl = document.getElementById('nav-boards');
+    const listEl = document.getElementById('log-list');
+    const loadingEl = document.getElementById('log-loading');
+    const errorEl = document.getElementById('log-error');
+    const LOG_CACHE_KEY = 'logPageCache';
+
+    if (window.Social) Social.init();   // floating thread watcher
+
+    const navLinks = getBoardKeys()
+      .map((key) => [key, getBoardConfig(key)])
+      .filter(([, info]) => info && info.showInNav)
+      .map(([key, info]) => `<a href="/board.html?board=${encodeURIComponent(key)}">${info.name}</a>`)
+      .join(' ');
+    navEl.innerHTML = '[ ' + navLinks + ' ]';
+
+    document.body.addEventListener('click', (e) => {
+      const jumpLink = e.target.closest('a[data-jump]');
+      if (!jumpLink) return;
+
+      e.preventDefault();
+
+      if (jumpLink.dataset.jump === 'top') {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        return;
+      }
+
+      if (jumpLink.dataset.jump === 'bottom') {
+        const pageBottom = Math.max(
+          document.body.scrollHeight,
+          document.documentElement.scrollHeight
+        );
+        window.scrollTo({ top: pageBottom, behavior: 'auto' });
+      }
+    });
+
+    function renderEntry(entry) {
+      return `
+        <article class="log-entry op-post" id="log-${entry.number}">
+          <div class="post-header log-entry-header">
+            <span class="post-subject">
+              <a href="#log-${entry.number}">${Utils.escHtml(entry.title)}</a>
+            </span>
+            <span class="post-time" title="${Utils.fullTime(entry.created_at)}">${Utils.relTime(entry.created_at)}</span>
+          </div>
+          <div class="post-body log-entry-body markdown-body">
+            ${Utils.renderMarkdown(entry.body)}
+          </div>
+        </article>
+      `;
+    }
+
+    function loadCachedLogs() {
+      try {
+        const raw = sessionStorage.getItem(LOG_CACHE_KEY);
+        if (!raw) return null;
+        const cached = JSON.parse(raw);
+        return Array.isArray(cached) ? cached : null;
+      } catch (e) {
+        console.warn('Failed to read cached log page entries:', e);
+        return null;
+      }
+    }
+
+    function saveCachedLogs(entries) {
+      try {
+        sessionStorage.setItem(LOG_CACHE_KEY, JSON.stringify(entries));
+      } catch (e) {
+        console.warn('Failed to cache log page entries:', e);
+      }
+    }
+
+    function renderEntries(entries) {
+      if (!entries.length) {
+        listEl.innerHTML = '<p class="log-empty">No log entries yet.</p>';
+        return;
+      }
+
+      listEl.innerHTML = entries.map(renderEntry).join('');
+
+      if (window.location.hash) {
+        const target = document.querySelector(window.location.hash);
+        if (target) target.scrollIntoView({ block: 'start' });
+      }
+    }
+
+    const cachedLogs = loadCachedLogs();
+    if (cachedLogs) {
+      loadingEl.style.display = 'none';
+      renderEntries(cachedLogs);
+    }
+
+    try {
+      const entries = await API.getAllLogs();
+      loadingEl.style.display = 'none';
+      renderEntries(entries);
+      saveCachedLogs(entries);
+    } catch (e) {
+      if (!cachedLogs) {
+        loadingEl.style.display = 'none';
+        errorEl.style.display = 'block';
+      }
+      console.error('Error fetching log entries:', e);
+    }
+  })();
+</script>
+</body>
+</html>
